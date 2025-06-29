@@ -18,7 +18,9 @@
 
   // Add CSS styles for modal
   const addStyles = () => {
+    if (document.querySelector("#clip-modal-styles")) return;
     const style = document.createElement("style");
+    style.id = "clip-modal-styles";
     style.textContent = `
       #clip-btn {
         display: flex;
@@ -184,22 +186,158 @@
 
   // inject once into right controls
   setInterval(() => {
+    addStyles();
     const ctr = document.querySelector(".ytp-right-controls");
-    if (ctr && !ctr.querySelector("#clip-btn") && !document.querySelector("#clip-modal-styles")) {
-      addStyles();
+    if (ctr && !ctr.querySelector("#clip-btn")) {
       const btn = document.createElement("button");
       btn.id = "clip-btn";
       btn.className = "ytp-button";
       btn.title = "Clip";
       btn.style.margin = "0 8px"; // Add equal margin on both sides
-      btn.innerHTML = `
-        <svg height="24" viewBox="0 0 24 24" width="24">
-          <path d="M22,3h-4l-5,5l3,3l6-6V3L22,3z M10.79,7.79C10.91,7.38,11,6.95,11,6.5C11,4.01,8.99,2,6.5,2S2,4.01,2,6.5S4.01,11,6.5,11 c0.45,0,.88-0.09,1.29-0.21L9,12l-1.21,1.21C7.38,13.09,6.95,13,6.5,13C4.01,13,2,15.01,2,17.5S4.01,22,6.5,22s4.5-2.01,4.5-4.5 c0-0.45-0.09-0.88-0.21-1.29L12,15l6,6h4v-2L10.79,7.79z M6.5,8C5.67,8,5,7.33,5,6.5S5.67,5,6.5,5S8,5.67,8,6.5S7.33,8,6.5,8z M6.5,19C5.67,19,5,18.33,5,17.5S5.67,16,6.5,16S8,16.67,8,17.5S7.33,19,6.5,19z" fill="white"></path>
-        </svg>`;
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("height", "24");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("width", "24");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", "M22,3h-4l-5,5l3,3l6-6V3L22,3z M10.79,7.79C10.91,7.38,11,6.95,11,6.5C11,4.01,8.99,2,6.5,2S2,4.01,2,6.5S4.01,11,6.5,11 c0.45,0,.88-0.09,1.29-0.21L9,12l-1.21,1.21C7.38,13.09,6.95,13,6.5,13C4.01,13,2,15.01,2,17.5S4.01,22,6.5,22s4.5-2.01,4.5-4.5 c0-0.45-0.09-0.88-0.21-1.29L12,15l6,6h4v-2L10.79,7.79z M6.5,8C5.67,8,5,7.33,5,6.5S5.67,5,6.5,5S8,5.67,8,6.5S7.33,8,6.5,8z M6.5,19C5.67,19,5,18.33,5,17.5S5.67,16,6.5,16S8,16.67,8,17.5S7.33,19,6.5,19z");
+      path.setAttribute("fill", "white");
+      svg.appendChild(path);
+      btn.appendChild(svg);
       btn.addEventListener("click", showModal);
       ctr.prepend(btn);
     }
   }, 500);
+
+  function createModalContent(modal) {
+    // Clear previous content safely
+    while (modal.firstChild) {
+      modal.removeChild(modal.firstChild);
+    }
+
+    // Helper to create time rows
+    const createTimeRow = (svgPath, label, timeIndex) => {
+      const row = document.createElement('div');
+      row.className = 'time-row';
+
+      const leftDiv = document.createElement('div');
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('height', '24');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('width', '24');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', svgPath);
+      path.setAttribute('fill', 'white');
+      svg.appendChild(path);
+
+      const span = document.createElement('span');
+      span.textContent = label;
+      leftDiv.appendChild(svg);
+      leftDiv.appendChild(span);
+
+      const rightDiv = document.createElement('div');
+      rightDiv.className = 'time-value';
+      rightDiv.dataset.timeIndex = timeIndex;
+      rightDiv.textContent = times.length > timeIndex ? times[timeIndex] : 'Click to select';
+
+      row.appendChild(leftDiv);
+      row.appendChild(rightDiv);
+      return row;
+    };
+
+    modal.appendChild(createTimeRow('M8 5v14l11-7z', 'Start time', 0));
+    modal.appendChild(createTimeRow('M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z', 'End time', 1));
+
+    // Controls
+    const controls = document.createElement('div');
+    controls.className = 'controls';
+
+    const resetBtn = document.createElement('button');
+    resetBtn.id = 'reset-btn';
+    resetBtn.className = 'control-button';
+    resetBtn.textContent = 'Reset';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'close-btn';
+    closeBtn.className = 'control-button';
+    closeBtn.textContent = 'Close';
+
+    const controlsRight = document.createElement('div');
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.id = 'download-btn';
+    downloadBtn.className = 'control-button';
+    if (times.length < 2) downloadBtn.disabled = true;
+    const downloadSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    downloadSvg.setAttribute('height', '24');
+    downloadSvg.setAttribute('viewBox', '0 0 24 24');
+    downloadSvg.setAttribute('width', '24');
+    downloadSvg.style.verticalAlign = 'middle';
+    const downloadPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    downloadPath.setAttribute('d', 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z');
+    downloadPath.setAttribute('fill', 'white');
+    downloadSvg.appendChild(downloadPath);
+    downloadBtn.appendChild(downloadSvg);
+
+    const formatBtn = document.createElement('button');
+    formatBtn.id = 'format-btn';
+    formatBtn.className = 'control-button';
+    formatBtn.textContent = `${format} `;
+    const formatSpan = document.createElement('span');
+    formatSpan.textContent = `(${format === 'mp3' ? 'audio' : 'video'})`;
+    formatBtn.appendChild(formatSpan);
+
+    const qualityBtn = document.createElement('button');
+    qualityBtn.id = 'quality-btn';
+    qualityBtn.className = 'control-button';
+    qualityBtn.style.display = format === 'mp4' ? 'inline-block' : 'none';
+    qualityBtn.textContent = quality;
+
+    const loopBtn = document.createElement('button');
+    loopBtn.id = 'loop-btn';
+    loopBtn.className = 'control-button';
+    loopBtn.textContent = 'Loop: OFF';
+
+    controls.appendChild(resetBtn);
+    controls.appendChild(closeBtn);
+    controlsRight.appendChild(downloadBtn);
+    controlsRight.appendChild(formatBtn);
+    controlsRight.appendChild(qualityBtn);
+    controlsRight.appendChild(loopBtn);
+    controls.appendChild(controlsRight);
+    modal.appendChild(controls);
+
+    // Format Options
+    const formatOptions = document.createElement('div');
+    formatOptions.id = 'format-options';
+    formatOptions.className = 'format-options';
+    formatOptions.style.display = 'none';
+    const formatMp3 = document.createElement('div');
+    formatMp3.className = 'format-option';
+    formatMp3.dataset.format = 'mp3';
+    formatMp3.textContent = 'mp3 (audio)';
+    const formatMp4 = document.createElement('div');
+    formatMp4.className = 'format-option';
+    formatMp4.dataset.format = 'mp4';
+    formatMp4.textContent = 'mp4 (video)';
+    formatOptions.appendChild(formatMp3);
+    formatOptions.appendChild(formatMp4);
+    modal.appendChild(formatOptions);
+
+    // Quality Options
+    const qualityOptions = document.createElement('div');
+    qualityOptions.id = 'quality-options';
+    qualityOptions.className = 'quality-options';
+    qualityOptions.style.display = 'none';
+    const qualities = ['1080p', '720p', '480p', '360p', '240p'];
+    qualities.forEach(q => {
+      const qualityOption = document.createElement('div');
+      qualityOption.className = 'quality-option';
+      qualityOption.dataset.quality = q;
+      qualityOption.textContent = q;
+      qualityOptions.appendChild(qualityOption);
+    });
+    modal.appendChild(qualityOptions);
+  }
 
   // Create and show the modal
   function showModal() {
@@ -211,74 +349,26 @@
     // Reset times
     times = [];
     selectingTimeIndex = -1;
-    
+
     // Create modal element
     modalElement = document.createElement("div");
     modalElement.id = "clip-modal";
-    
+
     // Position the modal near the clip button
     const clipBtn = document.querySelector("#clip-btn");
     const rect = clipBtn.getBoundingClientRect();
-    
+
     // Modal content
-    modalElement.innerHTML = `
-      <div class="time-row">
-        <div>
-          <svg height="24" viewBox="0 0 24 24" width="24">
-            <path d="M8 5v14l11-7z" fill="white"></path>
-          </svg>
-          <span>Start time</span>
-        </div>
-        <div class="time-value" data-time-index="0">${times.length > 0 ? times[0] : 'Click to select'}</div>
-      </div>
-      <div class="time-row">
-        <div>
-          <svg height="24" viewBox="0 0 24 24" width="24">
-            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z" fill="white"></path>
-          </svg>
-          <span>End time</span>
-        </div>
-        <div class="time-value" data-time-index="1">${times.length > 1 ? times[1] : 'Click to select'}</div>
-      </div>
-      <div class="controls">
-        <button id="reset-btn" class="control-button">Reset</button>
-        <button id="close-btn" class="control-button">Close</button>
-        <div>
-          <button id="download-btn" class="control-button" ${times.length < 2 ? 'disabled' : ''}>
-            <svg height="24" viewBox="0 0 24 24" width="24" style="vertical-align: middle;">
-              <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="white"></path>
-            </svg>
-          </button>
-          <button id="format-btn" class="control-button">
-            ${format} <span>(${format === 'mp3' ? 'audio' : 'video'})</span>
-          </button>
-          <button id="quality-btn" class="control-button" style="display: ${format === 'mp4' ? 'inline-block' : 'none'};">
-            ${quality}
-          </button>
-          <button id="loop-btn" class="control-button">${loopEnabled ? "Loop" : "Loop"}</button>
-        </div>
-      </div>
-      <div id="format-options" class="format-options" style="display: none;">
-        <div class="format-option" data-format="mp3">mp3 (audio)</div>
-        <div class="format-option" data-format="mp4">mp4 (video)</div>
-      </div>
-      <div id="quality-options" class="quality-options" style="display: none;">
-        <div class="quality-option" data-quality="1080p">1080p</div>
-        <div class="quality-option" data-quality="720p">720p</div>
-        <div class="quality-option" data-quality="480p">480p</div>
-        <div class="quality-option" data-quality="360p">360p</div>
-        <div class="quality-option" data-quality="240p">240p</div>
-      </div>
-    `;
-    
+    createModalContent(modalElement);
+
     document.body.appendChild(modalElement);
-    
+
     // Position the modal near the clip button
     positionModal();
-    
+
     // Add event listeners
     setupModalListeners();
-    
+
     // Set up timeline click listener
     setupTimelineListener();
   }
@@ -297,7 +387,7 @@
   function calculateEndTime(startTime) {
     const timeParts = startTime.split(':');
     let minutes, seconds;
-    
+
     if (timeParts.length === 2) {
       minutes = parseInt(timeParts[0]);
       seconds = parseInt(timeParts[1]);
@@ -308,10 +398,10 @@
     } else {
       return "01:00"; // Default
     }
-    
+
     // Add 1 minute
     minutes += 1;
-    
+
     // Format back to string
     if (timeParts.length === 2) {
       return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
@@ -328,7 +418,7 @@
     document.querySelectorAll("#clip-modal .time-value").forEach(timeElement => {
       timeElement.addEventListener("click", (e) => {
         const timeIndex = parseInt(e.target.dataset.timeIndex);
-        
+
         // Toggle selection state
         if (selectingTimeIndex === timeIndex) {
           // Already selecting this time, cancel selection
@@ -341,34 +431,50 @@
         }
       });
     });
-    
+
     // Reset button
     document.querySelector("#reset-btn").addEventListener("click", () => {
       times = [];
       selectingTimeIndex = -1;
       updateTimeDisplay();
     });
-    
+
     // Close button
     document.querySelector("#close-btn").addEventListener("click", () => {
       document.querySelector("#clip-modal")?.remove();
       selectingTimeIndex = -1;
       removeTimelineListener();
     });
-    
+
     // Format button
     document.querySelector("#format-btn").addEventListener("click", () => {
       const formatOptions = document.querySelector("#format-options");
       formatOptions.style.display = formatOptions.style.display === "none" ? "block" : "none";
     });
-    
+
     // Format options
     document.querySelectorAll(".format-option").forEach(option => {
       option.addEventListener("click", (e) => {
         format = e.target.dataset.format;
         document.querySelector("#format-options").style.display = "none";
-        document.querySelector("#format-btn").innerHTML = `${format} <span>(${format === 'mp3' ? 'audio' : 'video'})</span>`;
-        
+
+        // Update format button text while preserving structure
+        const formatBtn = document.querySelector("#format-btn");
+        if (formatBtn.firstChild && formatBtn.firstChild.nodeType === Node.TEXT_NODE) {
+          formatBtn.firstChild.textContent = `${format} `;
+        } else {
+          formatBtn.textContent = `${format} `;
+        }
+        const formatSpan = formatBtn.querySelector('span');
+        if (formatSpan) {
+          formatSpan.textContent = `(${format === 'mp3' ? 'audio' : 'video'})`;
+        } else if (formatBtn.firstChild && formatBtn.firstChild.nodeType === Node.TEXT_NODE) {
+          // Re-add the span if it was lost
+          const newSpan = document.createElement('span');
+          newSpan.textContent = `(${format === 'mp3' ? 'audio' : 'video'})`;
+          formatBtn.appendChild(newSpan);
+        }
+
         // Show/hide quality button based on format
         const qualityBtn = document.querySelector("#quality-btn");
         if (qualityBtn) {
@@ -376,13 +482,13 @@
         }
       });
     });
-    
+
     // Quality button
     document.querySelector("#quality-btn").addEventListener("click", () => {
       const qualityOptions = document.querySelector("#quality-options");
       qualityOptions.style.display = qualityOptions.style.display === "none" ? "block" : "none";
     });
-    
+
     // Quality options
     document.querySelectorAll(".quality-option").forEach(option => {
       option.addEventListener("click", (e) => {
@@ -391,16 +497,16 @@
         document.querySelector("#quality-btn").textContent = quality;
       });
     });
-    
+
     // Loop button
     document.querySelector("#loop-btn").addEventListener("click", () => {
       loopEnabled = !loopEnabled;
-      document.querySelector("#loop-btn").textContent = loopEnabled ? "Loop" : "Loop";
-      
+      document.querySelector("#loop-btn").textContent = loopEnabled ? "Loop: ON" : "Loop: OFF";
+
       // If loop is enabled, set up looping in YouTube player
       toggleLooping(loopEnabled);
     });
-    
+
     // Download button
     document.querySelector("#download-btn").addEventListener("click", () => {
       if (times.length >= 2) {
@@ -408,7 +514,7 @@
       }
     });
   }
-  
+
   // Set up timeline click listener
   function setupTimelineListener() {
     const progressBar = document.querySelector('.ytp-progress-bar');
@@ -417,7 +523,7 @@
       progressBar.addEventListener('click', handleTimelineClick);
     }
   }
-  
+
   // Remove timeline listener
   function removeTimelineListener() {
     const progressBar = document.querySelector('.ytp-progress-bar');
@@ -426,11 +532,11 @@
       progressBar.removeEventListener('click', handleTimelineClick);
     }
   }
-  
+
   // Handle timeline clicks
   function handleTimelineClick(e) {
     if (!document.querySelector("#clip-modal")) return;
-    
+
     // Small delay to let YouTube update the time display
     setTimeout(() => {
       const currentTime = document.querySelector(".ytp-time-current")?.textContent.trim();
@@ -448,7 +554,7 @@
       }
     }, 100);
   }
-  
+
   // Select time from video
   function selectTimeFromVideo(index) {
     const video = document.querySelector("video");
@@ -460,16 +566,16 @@
       }
     }
   }
-  
+
   // Update time display in modal
   function updateTimeDisplay() {
     const timeElements = document.querySelectorAll("#clip-modal .time-value");
     const downloadBtn = document.querySelector("#download-btn");
-    
+
     if (timeElements.length >= 2) {
       timeElements[0].textContent = times.length > 0 ? times[0] : 'Click to select';
       timeElements[1].textContent = times.length > 1 ? times[1] : 'Click to select';
-      
+
       // Enable/disable download button
       if (downloadBtn) {
         if (times.length >= 2) {
@@ -481,11 +587,11 @@
         }
       }
     }
-    
+
     // Update selection display
     updateTimeSelectionDisplay();
   }
-  
+
   // Update visual selection display
   function updateTimeSelectionDisplay() {
     const timeElements = document.querySelectorAll("#clip-modal .time-value");
@@ -497,7 +603,7 @@
       }
     });
   }
-  
+
   // Toggle video looping
   function toggleLooping(enabled) {
     const video = document.querySelector("video");
@@ -506,7 +612,7 @@
         // Convert times to seconds for looping
         const startSeconds = timeToSeconds(times[0]);
         const endSeconds = timeToSeconds(times[1]);
-        
+
         // Set up loop check interval
         if (!window.loopInterval) {
           window.loopInterval = setInterval(() => {
@@ -524,7 +630,7 @@
       }
     }
   }
-  
+
   // Convert time string to seconds
   function timeToSeconds(timeStr) {
     const parts = timeStr.split(':').map(Number);
@@ -539,53 +645,64 @@
   function sendClip() {
     let [start, end] = times;
     if (end < start) [start, end] = [end, start];
-    
+
     // Close the modal and remove timeline listener
     document.querySelector("#clip-modal")?.remove();
     selectingTimeIndex = -1;
     removeTimelineListener();
-    
-    // Create download popup
-    const popupEl = document.createElement("div");
-    popupEl.id = "clip-download-popup";
-    
+
     // Get video title
     const videoTitle = document.querySelector('.ytd-video-primary-info-renderer .title')?.textContent?.trim() || 'Video';
-    
-    popupEl.innerHTML = `
-      <h3>Downloading video stream...</h3>
-      <div class="info-text">This may take a while, get a cup of coffee while you wait!</div>
-      <div class="progress-bar-container">
-        <div class="progress-bar" id="download-progress-bar"></div>
-      </div>
-      <div class="eta-text">Elapsed: 0:00 | ETA: --:--</div>
-    `;
+
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Downloading video stream...';
+    const infoText = document.createElement('div');
+    infoText.className = 'info-text';
+    infoText.textContent = 'This may take a while, get a cup of coffee while you wait!';
+    const progressContainer = document.createElement('div');
+    progressContainer.className = 'progress-bar-container';
+    const progressBar = document.createElement('div');
+    progressBar.className = 'progress-bar';
+    progressBar.id = 'download-progress-bar';
+    progressContainer.appendChild(progressBar);
+    const etaText = document.createElement('div');
+    etaText.className = 'eta-text';
+    etaText.textContent = 'Elapsed: 0:00 | ETA: --:--';
+
+    const popupEl = document.createElement("div");
+    popupEl.id = "clip-download-popup";
+
+    popupEl.appendChild(h3);
+    popupEl.appendChild(infoText);
+    popupEl.appendChild(progressContainer);
+    popupEl.appendChild(etaText);
+
     document.body.appendChild(popupEl);
-    
+
     // Set up progress tracking variables
     const startTime = Date.now();
     let progressInterval;
     let elapsedSeconds = 0;
     let estimatedTotalSeconds = 180; // Default 3 minutes
-    
+
     // Function to format time as MM:SS
     const formatTime = (seconds) => {
       const mins = Math.floor(seconds / 60);
       const secs = Math.floor(seconds % 60);
       return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
-    
+
     // Start progress simulation
     progressInterval = setInterval(() => {
       elapsedSeconds = (Date.now() - startTime) / 1000;
-      
+
       // Calculate progress percentage (simulated)
       const progress = Math.min(elapsedSeconds / estimatedTotalSeconds, 0.95); // Cap at 95% until complete
       const progressBar = document.getElementById('download-progress-bar');
       if (progressBar) {
         progressBar.style.width = `${progress * 100}%`;
       }
-      
+
       // Update ETA
       const etaSeconds = estimatedTotalSeconds - elapsedSeconds;
       const etaText = etaSeconds > 0 ? formatTime(etaSeconds) : '0:00';
@@ -594,15 +711,15 @@
         etaElement.textContent = `Elapsed: ${formatTime(elapsedSeconds)} | ETA: ${etaText}`;
       }
     }, 1000);
-    
+
     GM_xmlhttpRequest({
       method: "POST",
       url: server,
       headers: { "Content-Type": "application/json" },
-      data: JSON.stringify({ 
-        url: location.href, 
-        start, 
-        end, 
+      data: JSON.stringify({
+        url: location.href,
+        start,
+        end,
         format,
         quality: format === 'mp4' ? quality : undefined
       }),
@@ -610,23 +727,23 @@
       onload(res) {
         // Stop progress interval
         clearInterval(progressInterval);
-        
+
         // Update download popup to show completion
         const progressBar = document.getElementById('download-progress-bar');
         if (progressBar) {
           progressBar.style.width = '100%';
         }
-        
+
         document.querySelector('#clip-download-popup h3').textContent = 'Download Complete!';
         document.querySelector('#clip-download-popup .info-text').textContent = 'Your clip has been saved.';
-        document.querySelector('#clip-download-popup .eta-text').textContent = 
+        document.querySelector('#clip-download-popup .eta-text').textContent =
           `Duration: ${formatTime(elapsedSeconds)} | Size: ${Math.round(res.response.size / 1024)} KB`;
-        
+
         // Auto-close the popup after a delay
         setTimeout(() => {
           document.querySelector("#clip-download-popup")?.remove();
         }, 3000);
-        
+
         // Trigger download
         const a = document.createElement("a");
         a.href = URL.createObjectURL(res.response);
@@ -636,13 +753,13 @@
       onerror() {
         // Stop progress interval
         clearInterval(progressInterval);
-        
+
         // Show error in the popup
         document.querySelector('#clip-download-popup h3').textContent = 'Error Creating Clip';
-        document.querySelector('#clip-download-popup .info-text').textContent = 
+        document.querySelector('#clip-download-popup .info-text').textContent =
           'There was an error processing your request. Please try again.';
         document.querySelector('#clip-download-popup .progress-bar').style.backgroundColor = '#ff3333';
-        
+
         // Auto-close after a delay
         setTimeout(() => {
           document.querySelector("#clip-download-popup")?.remove();
