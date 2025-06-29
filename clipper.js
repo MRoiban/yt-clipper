@@ -23,9 +23,10 @@
     style.id = "clip-modal-styles";
     style.textContent = `
       #clip-btn {
-        display: flex;
+        display: inline-flex;
         align-items: center;
         justify-content: center;
+        vertical-align: top;
       }
       #clip-btn svg {
         width: 24px;
