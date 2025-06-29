@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name        YouTube Clipper v4
 // @namespace   http://tampermonkey.net/
-// @version     4.0
+// @version     4.1
 // @match       *://*.youtube.com/watch*
 // @grant       GM_xmlhttpRequest
 // @connect     stellar.roiban.xyz
 // ==/UserScript==
 
 (() => {
-  const server = "https://stellar.roiban.xyz/clip";
+  const baseUrl = "https://clipper.roiban.xyz";
   let times = [];
   let format = "mp4"; // Default format
   let quality = "720p"; // Default quality for mp4
@@ -643,23 +643,159 @@
     return 0;
   }
 
+  function showErrorPopup(message) {
+    const popup = document.querySelector('#clip-download-popup');
+    if (popup) {
+      popup.querySelector('h3').textContent = 'Error';
+      popup.querySelector('.info-text').textContent = message;
+      const progressBar = popup.querySelector('.progress-bar');
+      if (progressBar) progressBar.style.backgroundColor = 'red';
+
+      // Add a close button to the error popup
+      let closeButton = popup.querySelector('.close-popup-btn');
+      if (!closeButton) {
+        closeButton = document.createElement('button');
+        closeButton.textContent = 'Close';
+        closeButton.className = 'close-popup-btn';
+        closeButton.style.marginTop = '15px';
+        closeButton.onclick = () => popup.remove();
+        popup.appendChild(closeButton);
+      }
+      
+      // Stop any further processing like auto-closing if we are showing an error
+      if (popup.dataset.autoCloseTimer) {
+          clearTimeout(parseInt(popup.dataset.autoCloseTimer));
+      }
+    }
+  }
+
+  function pollStatus(jobId) {
+    const statusUrl = `${baseUrl}/status/${jobId}`;
+    const h3 = document.querySelector('#clip-download-popup h3');
+    const infoText = document.querySelector('#clip-download-popup .info-text');
+    const progressBar = document.getElementById('download-progress-bar');
+    const etaText = document.querySelector('#clip-download-popup .eta-text');
+
+    const pollInterval = setInterval(() => {
+      GM_xmlhttpRequest({
+        method: "GET",
+        url: statusUrl,
+        responseType: "json",
+        onload(res) {
+          if (res.status === 200) {
+            const job = res.response;
+            switch (job.status) {
+              case 'starting':
+                h3.textContent = 'Job is starting...';
+                etaText.textContent = 'Please wait...';
+                break;
+              case 'downloading':
+                h3.textContent = 'Downloading...';
+                if (job.progress && job.progress.percent) {
+                  const percent = parseFloat(job.progress.percent) || 0;
+                  progressBar.style.width = `${percent}%`;
+                  etaText.textContent = `ETA: ${job.progress.eta || '--:--'} | Speed: ${job.progress.speed || 'N/A'}`;
+                }
+                break;
+              case 'trimming':
+                h3.textContent = 'Trimming video...';
+                progressBar.style.width = '100%';
+                infoText.textContent = 'Finalizing your clip, this should be quick!';
+                etaText.textContent = '';
+                break;
+              case 'completed':
+                clearInterval(pollInterval);
+                h3.textContent = 'Download Ready!';
+                infoText.textContent = 'Your clip is ready to be downloaded.';
+                etaText.textContent = '';
+                downloadFinalFile(jobId);
+                break;
+              case 'error':
+                clearInterval(pollInterval);
+                showErrorPopup(job.error || 'An unknown error occurred.');
+                break;
+            }
+          } else {
+            clearInterval(pollInterval);
+            showErrorPopup('Failed to get job status.');
+          }
+        },
+        onerror() {
+          clearInterval(pollInterval);
+          showErrorPopup('Could not connect to the server for status updates.');
+        }
+      });
+    }, 2000);
+  }
+
+  function downloadFinalFile(jobId) {
+      const downloadUrl = `${baseUrl}/download/${jobId}`;
+      const videoTitle = document.querySelector('.ytd-video-primary-info-renderer .title')?.textContent?.trim() || 'Video';
+      let [start, end] = times;
+      if (end < start) [start, end] = [end, start];
+
+      const downloadNowBtn = document.createElement('button');
+      downloadNowBtn.textContent = 'Download Now';
+      downloadNowBtn.style.marginTop = '15px';
+      downloadNowBtn.onclick = () => {
+          GM_xmlhttpRequest({
+              method: "GET",
+              url: downloadUrl,
+              responseType: "blob",
+              onload(res) {
+                  if (res.status === 200) {
+                      const a = document.createElement("a");
+                      a.href = URL.createObjectURL(res.response);
+                      a.download = `${videoTitle}_${start.replace(/:/g, "")}-${end.replace(/:/g, "")}.${format}`;
+                      a.click();
+                      URL.revokeObjectURL(a.href);
+                      
+                      const popup = document.querySelector("#clip-download-popup");
+                      if(popup) {
+                        popup.querySelector('h3').textContent = 'Download Started!';
+                        popup.querySelector('.info-text').textContent = 'Check your browser downloads.';
+                        // remove the download button
+                        downloadNowBtn.remove();
+                        const autoCloseTimer = setTimeout(() => {
+                            popup.remove();
+                        }, 3000);
+                        popup.dataset.autoCloseTimer = autoCloseTimer;
+                      }
+                  } else {
+                      showErrorPopup('Failed to download the file.');
+                  }
+              },
+              onerror() {
+                  showErrorPopup('An error occurred during download.');
+              }
+          });
+      };
+      
+      const popup = document.querySelector('#clip-download-popup');
+      if (popup) {
+        // Clear previous content like ETA text before adding the button
+        const etaText = popup.querySelector('.eta-text');
+        if(etaText) etaText.remove();
+        
+        popup.appendChild(downloadNowBtn);
+      }
+  }
+
   function sendClip() {
     let [start, end] = times;
     if (end < start) [start, end] = [end, start];
 
-    // Close the modal and remove timeline listener
     document.querySelector("#clip-modal")?.remove();
     selectingTimeIndex = -1;
     removeTimelineListener();
 
-    // Get video title
     const videoTitle = document.querySelector('.ytd-video-primary-info-renderer .title')?.textContent?.trim() || 'Video';
 
     const h3 = document.createElement('h3');
-    h3.textContent = 'Downloading video stream...';
+    h3.textContent = 'Initializing...';
     const infoText = document.createElement('div');
     infoText.className = 'info-text';
-    infoText.textContent = 'This may take a while, get a cup of coffee while you wait!';
+    infoText.textContent = 'Preparing your clip request.';
     const progressContainer = document.createElement('div');
     progressContainer.className = 'progress-bar-container';
     const progressBar = document.createElement('div');
@@ -668,7 +804,7 @@
     progressContainer.appendChild(progressBar);
     const etaText = document.createElement('div');
     etaText.className = 'eta-text';
-    etaText.textContent = 'Elapsed: 0:00 | ETA: --:--';
+    etaText.textContent = 'Contacting server...';
 
     const popupEl = document.createElement("div");
     popupEl.id = "clip-download-popup";
@@ -680,42 +816,9 @@
 
     document.body.appendChild(popupEl);
 
-    // Set up progress tracking variables
-    const startTime = Date.now();
-    let progressInterval;
-    let elapsedSeconds = 0;
-    let estimatedTotalSeconds = 180; // Default 3 minutes
-
-    // Function to format time as MM:SS
-    const formatTime = (seconds) => {
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
-
-    // Start progress simulation
-    progressInterval = setInterval(() => {
-      elapsedSeconds = (Date.now() - startTime) / 1000;
-
-      // Calculate progress percentage (simulated)
-      const progress = Math.min(elapsedSeconds / estimatedTotalSeconds, 0.95); // Cap at 95% until complete
-      const progressBar = document.getElementById('download-progress-bar');
-      if (progressBar) {
-        progressBar.style.width = `${progress * 100}%`;
-      }
-
-      // Update ETA
-      const etaSeconds = estimatedTotalSeconds - elapsedSeconds;
-      const etaText = etaSeconds > 0 ? formatTime(etaSeconds) : '0:00';
-      const etaElement = document.querySelector('#clip-download-popup .eta-text');
-      if (etaElement) {
-        etaElement.textContent = `Elapsed: ${formatTime(elapsedSeconds)} | ETA: ${etaText}`;
-      }
-    }, 1000);
-
     GM_xmlhttpRequest({
       method: "POST",
-      url: server,
+      url: `${baseUrl}/clip`,
       headers: { "Content-Type": "application/json" },
       data: JSON.stringify({
         url: location.href,
@@ -724,47 +827,20 @@
         format,
         quality: format === 'mp4' ? quality : undefined
       }),
-      responseType: "blob",
+      responseType: "json",
       onload(res) {
-        // Stop progress interval
-        clearInterval(progressInterval);
-
-        // Update download popup to show completion
-        const progressBar = document.getElementById('download-progress-bar');
-        if (progressBar) {
-          progressBar.style.width = '100%';
-        }
-
-        document.querySelector('#clip-download-popup h3').textContent = 'Download Complete!';
-        document.querySelector('#clip-download-popup .info-text').textContent = 'Your clip has been saved.';
-        document.querySelector('#clip-download-popup .eta-text').textContent =
-          `Duration: ${formatTime(elapsedSeconds)} | Size: ${Math.round(res.response.size / 1024)} KB`;
-
-        // Auto-close the popup after a delay
-        setTimeout(() => {
-          document.querySelector("#clip-download-popup")?.remove();
-        }, 3000);
-
-        // Trigger download
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(res.response);
-        a.download = `${videoTitle}_${start.replace(/:/g, "")}-${end.replace(/:/g, "")}.${format}`;
-        a.click();
+          if (res.status === 200 && res.response.job_id) {
+            pollStatus(res.response.job_id);
+          } else {
+            let errorMsg = 'Failed to start clipping job.';
+            if (res.response && res.response.error) {
+                errorMsg = res.response.error;
+            }
+            showErrorPopup(errorMsg);
+          }
       },
       onerror() {
-        // Stop progress interval
-        clearInterval(progressInterval);
-
-        // Show error in the popup
-        document.querySelector('#clip-download-popup h3').textContent = 'Error Creating Clip';
-        document.querySelector('#clip-download-popup .info-text').textContent =
-          'There was an error processing your request. Please try again.';
-        document.querySelector('#clip-download-popup .progress-bar').style.backgroundColor = '#ff3333';
-
-        // Auto-close after a delay
-        setTimeout(() => {
-          document.querySelector("#clip-download-popup")?.remove();
-        }, 5000);
+        showErrorPopup('Could not connect to the clipping server.');
       }
     });
   }

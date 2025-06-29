@@ -4,132 +4,166 @@ import subprocess, uuid, os, shutil
 import threading
 import time
 from datetime import datetime, timedelta
+import re
 
 app = Flask(__name__)
-CORS(app, resources={r"/clip": {"origins": "*"}})
+CORS(app)
 
-# --- Added for delayed deletion ---
+# --- Globals for job status ---
+jobs = {}
+jobs_lock = threading.Lock()
+# ---
+
+# --- For delayed deletion ---
 files_to_delete = {}
 files_lock = threading.Lock()
 DELETION_DELAY_MINUTES = 5  # Configure as needed
-# --- End of added section ---
+# ---
 
 @app.after_request
 def add_cors(resp):
     resp.headers["Access-Control-Allow-Origin"]  = "*"
     resp.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Requested-With"
     return resp
 
-@app.route('/clip', methods=['POST', 'OPTIONS'])
+@app.route('/clip', methods=['POST'])
 def clip_video():
-    if request.method == 'OPTIONS':
-        return '', 204
-
     data = request.get_json(force=True)
     url, start, end, format_type = data.get('url'), data.get('start'), data.get('end'), data.get('format', 'mp4')
     if not (url and start and end):
         return jsonify(error="missing url/start/end"), 400
 
-    uid = uuid.uuid4().hex
+    job_id = uuid.uuid4().hex
     
-    # Set file extensions based on format
+    with jobs_lock:
+        jobs[job_id] = {'status': 'starting', 'progress': {}}
+
+    thread = threading.Thread(target=download_and_trim, args=(job_id, url, start, end, format_type))
+    thread.start()
+    
+    return jsonify(job_id=job_id)
+
+@app.route('/status/<job_id>', methods=['GET'])
+def get_status(job_id):
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if job is None:
+            return jsonify(error="Job not found"), 404
+        return jsonify(job)
+
+@app.route('/download/<job_id>', methods=['GET'])
+def download_file(job_id):
+    filepath = None
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if job is None or job.get('status') != 'completed':
+            return jsonify(error="File not ready or job not found"), 404
+        
+        filepath = job.get('filepath')
+
+    if not filepath or not os.path.exists(filepath):
+        return jsonify(error="File not found on server"), 404
+
+    with files_lock:
+        files_to_delete[filepath] = datetime.now() + timedelta(minutes=DELETION_DELAY_MINUTES)
+    
+    return send_file(filepath, as_attachment=True)
+
+def download_and_trim(job_id, url, start, end, format_type):
+    with jobs_lock:
+        jobs[job_id]['status'] = 'downloading'
+
+    uid = job_id
     if format_type == 'mp3':
-        temp_fn = f"temp_{uid}.%(ext)s"  # Let yt-dlp decide the extension
+        temp_fn_pattern = f"temp_{uid}.%(ext)s"
         out_fn = f"clip_{uid}.mp3"
     else:
-        temp_fn = f"temp_{uid}.mp4"
+        temp_fn_pattern = f"temp_{uid}.mp4"
         out_fn = f"clip_{uid}.mp4"
-
-    actual_temp_fn_path = None # Store the actual temp filename path
+    
+    actual_temp_fn_path = None
+    output_file_path = os.path.abspath(out_fn)
 
     try:
-        # 1) download full video/audio based on format
+        cmd = ["yt-dlp", url, "-o", temp_fn_pattern, '--progress', '--no-playlist']
         if format_type == 'mp3':
-            # Extract audio only
-            subprocess.run([
-                "yt-dlp", url,
-                "-x", "--audio-format", "mp3",
-                "-o", temp_fn
-            ], check=True)
-            # Find the actual downloaded file (yt-dlp changes extension)
-            # Ensure we search in the correct directory (current working directory)
-            temp_files_found = [f for f in os.listdir('.') if f.startswith(f"temp_{uid}")]
-            if temp_files_found:
-                actual_temp_fn_path = os.path.abspath(temp_files_found[0])
+            cmd.extend(["-x", "--audio-format", "mp3"])
+        else:
+            cmd.extend(["-f", "best", "--merge-output-format", "mp4"])
+
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, bufsize=1)
+
+        for line in iter(process.stdout.readline, ''):
+            match = re.search(r'\[download\]\s+(?P<percent>[\d\.]+)%\s+of\s+~\s*(?P<size>[\d\.]+\w+)\s+at\s+(?P<speed>[\d\.]+\w+/s)\s+ETA\s+(?P<eta>[\d:]+)', line)
+            if match:
+                progress_data = match.groupdict()
+                with jobs_lock:
+                    jobs[job_id]['progress'] = {
+                        'percent': progress_data['percent'],
+                        'eta': progress_data['eta'],
+                        'speed': progress_data['speed'],
+                        'size': progress_data['size']
+                    }
+        
+        process.stdout.close()
+        return_code = process.wait()
+        
+        if return_code != 0:
+            stderr_output = process.stderr.read()
+            raise subprocess.CalledProcessError(return_code, cmd, stderr=stderr_output)
+
+        temp_files_found = [f for f in os.listdir('.') if f.startswith(f"temp_{uid}")]
+        if temp_files_found:
+            actual_temp_fn_path = os.path.abspath(temp_files_found[0])
+        else:
+            raise Exception("Downloaded file not found")
+        
+        with jobs_lock:
+            jobs[job_id]['status'] = 'trimming'
+            jobs[job_id]['progress'] = {}
+
+        ffmpeg_cmd = [
+            "ffmpeg", "-y",
+            "-i", actual_temp_fn_path,
+            "-ss", start,
+            "-to", end,
+            "-c", "copy",
+            output_file_path
+        ]
+        result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+
+        with jobs_lock:
+            jobs[job_id]['status'] = 'completed'
+            jobs[job_id]['filepath'] = output_file_path
+
+    except Exception as e:
+        with jobs_lock:
+            jobs[job_id]['status'] = 'error'
+            if isinstance(e, subprocess.CalledProcessError):
+                jobs[job_id]['error'] = e.stderr.strip() if e.stderr else str(e)
             else:
-                raise Exception("Downloaded file not found")
-        else:
-            # Download video
-            subprocess.run([
-                "yt-dlp", url,
-                "-f", "bestvideo+bestaudio",
-                "--merge-output-format", "mp4",
-                "-o", temp_fn
-            ], check=True)
-            actual_temp_fn_path = os.path.abspath(temp_fn)
-
-        # 2) trim with ffmpeg
-        output_file_path = os.path.abspath(out_fn)
-        if format_type == 'mp3':
-            # Audio trimming
-            subprocess.run([
-                "ffmpeg", "-y",
-                "-i", actual_temp_fn_path,
-                "-ss", start,
-                "-to", end,
-                "-c", "copy",
-                output_file_path
-            ], check=True)
-        else:
-            # Video trimming (stream copy)
-            subprocess.run([
-                "ffmpeg", "-y",
-                "-i", actual_temp_fn_path,
-                "-ss", start,
-                "-to", end,
-                "-c", "copy",
-                output_file_path
-            ], check=True)
-
-    except subprocess.CalledProcessError as e:
-        # clean up partials
+                jobs[job_id]['error'] = str(e)
+    finally:
         if actual_temp_fn_path and os.path.exists(actual_temp_fn_path):
-             os.remove(actual_temp_fn_path)
-        if os.path.exists(out_fn): # Check if out_fn was created before trying to remove
-            os.remove(out_fn)
-        # More robust cleanup for temp files based on initial temp_fn pattern
-        # This handles cases where yt-dlp might create multiple files or if the exact name isn't known
+            try:
+                os.remove(actual_temp_fn_path)
+            except OSError:
+                pass
+        
         for f_name in os.listdir('.'):
             if f_name.startswith(f"temp_{uid}"):
                 try:
                     os.remove(f_name)
                 except OSError:
-                    pass # File might have been removed already or other issue
-        return jsonify(error=str(e)), 500
-    finally:
-        # Ensure temporary downloaded file is removed if it exists
-        if actual_temp_fn_path and os.path.exists(actual_temp_fn_path):
-            try:
-                os.remove(actual_temp_fn_path)
-            except OSError:
-                # Log or handle error if necessary, e.g., file already removed
-                pass
+                    pass
 
-
-    # Schedule file for deletion
-    with files_lock:
-        files_to_delete[output_file_path] = datetime.now() + timedelta(minutes=DELETION_DELAY_MINUTES)
-
-    return send_file(output_file_path, as_attachment=True)
-
-# --- Added for delayed deletion ---
 def cleanup_files_periodically():
     while True:
         now = datetime.now()
         files_to_remove_this_run = []
         with files_lock:
-            for filepath, deletion_time in list(files_to_delete.items()): # Iterate over a copy
+            for filepath, deletion_time in list(files_to_delete.items()):
                 if now >= deletion_time:
                     files_to_remove_this_run.append(filepath)
             
@@ -137,23 +171,14 @@ def cleanup_files_periodically():
                 try:
                     if os.path.exists(filepath):
                         os.remove(filepath)
-                        print(f"Successfully deleted {filepath}")
                     del files_to_delete[filepath]
-                except OSError as e:
-                    print(f"Error deleting file {filepath}: {e}")
-                    # Optionally, decide if you want to remove it from the dict anyway
-                    # or retry later (though current logic just removes it from dict)
-                    if filepath in files_to_delete: # Check if not already deleted by another thread/process
+                except OSError:
+                    if filepath in files_to_delete:
                         del files_to_delete[filepath]
         
-        # Sleep for a while before checking again, e.g., every 60 seconds
         time.sleep(60)
 
-# --- End of added section ---
-
 if __name__ == '__main__':
-    # --- Added for delayed deletion ---
     cleanup_thread = threading.Thread(target=cleanup_files_periodically, daemon=True)
     cleanup_thread.start()
-    # --- End of added section ---
     app.run(host='0.0.0.0', port=3000, debug=True)
