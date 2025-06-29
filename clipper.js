@@ -734,51 +734,35 @@
       let [start, end] = times;
       if (end < start) [start, end] = [end, start];
 
-      const downloadNowBtn = document.createElement('button');
-      downloadNowBtn.textContent = 'Download Now';
-      downloadNowBtn.style.marginTop = '15px';
-      downloadNowBtn.onclick = () => {
-          GM_xmlhttpRequest({
-              method: "GET",
-              url: downloadUrl,
-              responseType: "blob",
-              onload(res) {
-                  if (res.status === 200) {
-                      const a = document.createElement("a");
-                      a.href = URL.createObjectURL(res.response);
-                      a.download = `${videoTitle}_${start.replace(/:/g, "")}-${end.replace(/:/g, "")}.${format}`;
-                      a.click();
-                      URL.revokeObjectURL(a.href);
-                      
-                      const popup = document.querySelector("#clip-download-popup");
-                      if(popup) {
-                        popup.querySelector('h3').textContent = 'Download Started!';
-                        popup.querySelector('.info-text').textContent = 'Check your browser downloads.';
-                        // remove the download button
-                        downloadNowBtn.remove();
-                        const autoCloseTimer = setTimeout(() => {
-                            popup.remove();
-                        }, 3000);
-                        popup.dataset.autoCloseTimer = autoCloseTimer;
-                      }
-                  } else {
-                      showErrorPopup('Failed to download the file.');
+      GM_xmlhttpRequest({
+          method: "GET",
+          url: downloadUrl,
+          responseType: "blob",
+          onload(res) {
+              if (res.status === 200) {
+                  const a = document.createElement("a");
+                  a.href = URL.createObjectURL(res.response);
+                  a.download = `${videoTitle}_${start.replace(/:/g, "")}-${end.replace(/:/g, "")}.${format}`;
+                  a.click();
+                  URL.revokeObjectURL(a.href);
+                  
+                  const popup = document.querySelector("#clip-download-popup");
+                  if(popup) {
+                    popup.querySelector('h3').textContent = 'Download Started!';
+                    popup.querySelector('.info-text').textContent = 'Check your browser downloads.';
+                    const autoCloseTimer = setTimeout(() => {
+                        popup.remove();
+                    }, 3000);
+                    popup.dataset.autoCloseTimer = autoCloseTimer;
                   }
-              },
-              onerror() {
-                  showErrorPopup('An error occurred during download.');
+              } else {
+                  showErrorPopup('Failed to download the file.');
               }
-          });
-      };
-      
-      const popup = document.querySelector('#clip-download-popup');
-      if (popup) {
-        // Clear previous content like ETA text before adding the button
-        const etaText = popup.querySelector('.eta-text');
-        if(etaText) etaText.remove();
-        
-        popup.appendChild(downloadNowBtn);
-      }
+          },
+          onerror() {
+              showErrorPopup('An error occurred during download.');
+          }
+      });
   }
 
   function sendClip() {
